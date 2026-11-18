@@ -125,7 +125,7 @@ switch ($Op) {
     $f.StartPosition = 'CenterScreen'; $f.FormBorderStyle = 'FixedDialog'; $f.MaximizeBox = $false; $f.MinimizeBox = $false
     $f.Padding = New-Object Windows.Forms.Padding(12)
     # Wrapping label: the whole message (incl. the destination) is always visible.
-    $l = New-Object Windows.Forms.Label; $l.Text = $Name; $l.AutoSize = $true
+    $l = New-Object Windows.Forms.Label; $l.UseMnemonic = $false; $l.Text = $Name; $l.AutoSize = $true
     $l.MaximumSize = New-Object Drawing.Size(520, 0); $l.Location = New-Object Drawing.Point(12, 12)
     $f.Controls.Add($l); $f.PerformLayout()
     $y = $l.Bottom + 16

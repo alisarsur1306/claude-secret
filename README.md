@@ -5,7 +5,7 @@ Vercel, GitHub, Cloudflare, Fly, Supabase or Render for you.**
 
 ![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
-![deps](https://img.shields.io/badge/dependencies-none-brightgreen)
+![deps](https://img.shields.io/badge/npm%2Fpip%20deps-none-brightgreen)
 ![claude code](https://img.shields.io/badge/Claude%20Code-skill-d97757)
 
 You paste an API key into the chat so Claude can deploy, call an API, or query a database. That
@@ -51,8 +51,9 @@ Claude:  secret run OPENAI_KEY=OPENAI_API_KEY -- curl https://api.openai.com/v1/
   (DPAPI), so keys are encrypted at rest. No plaintext `.env` files and no extra service.
 - **🛑 Hard to misuse.** It refuses multi-line or garbled values, reads every save back to confirm
   it, won't run under `bash -x`, and won't inject into variables like `PATH` or `LD_PRELOAD`.
-- **🪶 Tiny.** Two small scripts plus an optional phone helper. Nothing to install from npm or pip.
-  Review it in five minutes.
+- **🪶 Small and auditable.** One bash script, a PowerShell backend for Windows, and an optional
+  phone helper. It uses only tools your OS already has (plus the platform CLIs you push to), and
+  there's nothing to install from npm or pip. You can read all of it in one sitting.
 
 ## 🚀 Install
 
@@ -74,6 +75,8 @@ Then start a new Claude Code session. Run the same command again to update, or r
 - The phone link also needs Python 3 and `cloudflared`:
   - macOS: `brew install cloudflared`
   - Windows: `winget install Cloudflare.cloudflared`
+- `push` needs the platform's own CLI, logged in. Vercel needs a CLI recent enough to support
+  `vercel env add --project` (tested with 56.x).
 
 ## 🧭 Usage
 
@@ -108,10 +111,13 @@ secret pipe TOKEN --line -- some-cli login --with-token # anything else that rea
 
 - The value always goes to the platform's CLI or API on stdin: never on a command line, never in a
   file on disk.
-- The destination must always be named explicitly. Nothing is picked up from the current folder.
-- The CLIs use your own logins (`vercel login`, `gh auth login`, `wrangler login`, …). Token and
-  account environment variables such as `VERCEL_TOKEN` or `GH_TOKEN` are ignored, so a planted
-  variable can't redirect the push to someone else's account.
+- The destination (project, repo, worker, app, service) must always be named explicitly. Config
+  files in the folder it runs from, such as `vercel.json` or `wrangler.toml`, still apply, so run
+  it from your own project.
+- The platform CLIs and `curl` run with a minimal environment: `env -i` plus PATH, your real home
+  and the locale. They use your own logins (`vercel login`, `gh auth login`, `wrangler login`, …),
+  and any token, account, config-dir, proxy or `NODE_OPTIONS` variable is ignored, so a planted
+  variable can't redirect the push. Multi-account Cloudflare users pass `--account-id`.
 - The Render and Supabase API tokens are themselves saved secrets. A successful API push prints only
   the HTTP status, because the response would echo the value back.
 
@@ -119,14 +125,15 @@ secret pipe TOKEN --line -- some-cli login --with-token # anything else that rea
 
 | `secret config mode …` | Claude may use or push secrets… |
 |---|---|
-| `confirm` | only after you click **Allow** in a dialog that shows the exact command or destination (covers `run`, `push` and `pipe`) |
+| `confirm` | only after you click **Allow** in a dialog that shows the complete command or destination (covers `run`, `push` and `pipe`; a command too long to show in full is refused) |
 | `auto` *(default)* | when you ask for it in the chat |
 | `full` | also push on its own when your task needs it (e.g. a deploy is missing an env var) |
 
 - **Every push:** a desktop notification (best effort, so Focus modes can hide it) and a chat message.
 - **Every add, run and push:** an entry in `secret log`.
-- **The mode is stored in your OS vault, not a config file.** Loosening it requires a click in a
-  native dialog, which only `secret config` can do.
+- **The mode is stored in your OS vault, not a config file.** Changing it through `secret config`
+  to something looser requires a click in a native dialog. Deleting that vault entry directly
+  resets the mode to `auto`. The deny rules below stop Claude from doing that on macOS.
 
 ## 🛡️ Security model, honestly
 
@@ -136,11 +143,13 @@ secret pipe TOKEN --line -- some-cli login --with-token # anything else that rea
   and are handed to your command as an environment variable.
 - Accidental echo: command output is redacted before Claude sees it.
 - Pastejacking: multi-line or non-printable values are rejected before they reach the vault.
-- Fake tools: the Keychain CLI, dialogs, `perl` and `curl` are called by absolute path, and the
-  script runs with `bash -p`, so a planted `PATH` entry or `BASH_ENV` can't fake a dialog or switch
-  off redaction.
-- Silent swaps: replacing a saved secret from a program (stdin) needs a click. A mistyped or
-  attacker-supplied destination is shown in full in every confirmation dialog and log entry.
+- Fake tools: PATH is hardened before the script runs anything. The Keychain CLI, dialogs, `perl`
+  and `curl` are called by absolute path, Windows' PowerShell is located through the OS rather than
+  `$SYSTEMROOT`, and the script runs with `bash -p`. So a planted `PATH` entry or `BASH_ENV` can't
+  fake a dialog or switch off redaction.
+- Silent swaps: replacing a saved secret from a program (stdin) or the clipboard needs a click. The
+  phone page proves itself with a one-time token instead. A mistyped or attacker-supplied
+  destination is shown in full in every confirmation dialog.
 - Phone link abuse: the link has a random 192-bit token, works once, and expires in 5 minutes
   (enforced on every request, with a hard-stop watchdog). It binds only to `127.0.0.1` behind the
   tunnel, times out stalled connections, logs nothing, sends `no-store`/`no-referrer` headers, and
