@@ -1,6 +1,7 @@
 # 🔐 claude-secret
 
-**Give Claude Code your API keys without ever showing them to Claude.**
+**Give Claude Code your API keys without ever showing them to Claude, and let it ship them to
+Vercel, GitHub, Cloudflare, Fly, Supabase or Render for you.**
 
 ![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -37,6 +38,12 @@ Claude:  secret run OPENAI_KEY=OPENAI_API_KEY -- curl https://api.openai.com/v1/
   and get a one-time HTTPS link (single use, expires in 5 minutes). Paste on your phone and you're done.
 - **🤖 Claude uses it on its own.** Ask "deploy with my Cloudflare token" and Claude finds the saved
   name and injects it as an environment variable for that one command.
+- **☁️ Push straight to the cloud.** "Put OPENAI_KEY on my Vercel project" sets the env var in
+  **Vercel, GitHub Actions, Cloudflare Workers/Pages, Fly.io, Supabase or Render**, or any CLI that
+  reads stdin. No copy-paste into dashboards, and no human needed in the loop if you choose.
+- **🔔 You always know.** Every push shows a desktop notification, a line in the chat, and an entry
+  in an audit log (names and targets only). Choose how much autonomy Claude gets: `confirm` each
+  push, `auto` when you ask, or `full`.
 - **🧹 Output is scrubbed.** Anything the command prints is checked, and the key is replaced with
   `[secret:NAME]` before Claude sees it, including its JSON-escaped, URL-encoded, hex and base64
   forms (so a `Basic` auth header gets caught too).
@@ -78,6 +85,8 @@ Then start a new Claude Code session. Run the same command again to update, or r
 | `/secret` | Lists saved names (never values). |
 | *"use my GITHUB_TOKEN to …"* | Claude runs the command with the secret injected. |
 
+| *"add OPENAI_KEY to my Vercel project"* | Claude pushes it to Vercel's env vars and tells you. |
+
 Under the hood, Claude calls a small helper:
 
 ```bash
@@ -85,6 +94,34 @@ secret run GITHUB_TOKEN -- gh api user
 secret run OPENAI_KEY=OPENAI_API_KEY -- python3 app.py     # NAME=ENV_VAR renames
 secret list | secret has NAME | secret delete NAME
 ```
+
+### ☁️ Push to cloud environments
+
+```bash
+secret push OPENAI_KEY vercel --env production --as OPENAI_API_KEY
+secret push NPM_TOKEN  github --repo you/app            # Actions secret (also --env, --org)
+secret push STRIPE_KEY cloudflare --name my-worker      # or --pages my-site
+secret push DB_URL     fly --app my-app
+secret push RESEND_KEY supabase --project-ref abcd      # uses `supabase login`
+secret push API_KEY    render --service srv-xxx         # uses your saved RENDER_API_KEY
+secret pipe TOKEN --line -- some-cli login --with-token # anything else that reads stdin
+```
+
+The value always goes to the platform's CLI or API on stdin: never on a command line, never in
+a file on disk. The CLIs use your existing logins (`vercel login`, `gh auth login`, `wrangler
+login`, …), and the Render/Supabase API tokens are themselves saved secrets.
+
+**Autonomy and notifications:**
+
+| `secret config mode …` | Claude may push… |
+|---|---|
+| `confirm` | only after you click **Allow** in a dialog on your computer |
+| `auto` *(default)* | when you ask for it in the chat |
+| `full` | also on its own when a task needs it (e.g. a deploy is missing an env var) |
+
+In every mode you get a desktop notification and a chat message, and `secret log` keeps an audit
+trail. Loosening the mode requires a click in a native dialog, so Claude can't promote itself to
+`full`.
 
 ## 🛡️ Security model, honestly
 
@@ -124,6 +161,8 @@ secret list | secret has NAME | secret delete NAME
   that read keys from the environment or stdin.
 - The phone link uses a Cloudflare quick tunnel. Traffic is HTTPS, but Cloudflare terminates TLS,
   so the value passes through Cloudflare's edge in transit.
+- Pushing to a platform means the platform has the secret. Its dashboards, logs and team members
+  follow that platform's rules, not this tool's.
 - Clipboard mode clears the clipboard, but not a clipboard manager's history.
 - Values must be one line of printable ASCII (up to 1280 characters on Windows).
 

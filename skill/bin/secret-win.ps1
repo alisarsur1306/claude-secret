@@ -7,6 +7,8 @@
 #   exists NAME    exit 0 / 3
 #   delete NAME    exit 0 / 3
 #   dialog NAME    hidden-input window; value on stdout, exit 1 if cancelled
+#   notify MSG     tray balloon notification (names/targets only)
+#   confirm MSG    Allow/Deny window; prints allow|deny, denies after 120 s
 #   clip-get       clipboard text on stdout
 #   clip-clear     empty the clipboard
 #   spawn EXE ARG...  start a detached hidden process (for the phone link)
@@ -14,7 +16,8 @@
 param([Parameter(Mandatory = $true)][string]$Op, [string]$Name, [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
 $ErrorActionPreference = 'Stop'
 
-if ($Name -and $Name -notmatch '^[A-Za-z_][A-Za-z0-9_]{0,63}$' -and $Op -ne 'spawn') { [Console]::Error.WriteLine("invalid name"); exit 2 }
+# For these ops $Name is a secret name; for notify/confirm/spawn it is a message or path.
+if ($Op -in 'write', 'read', 'exists', 'delete', 'dialog' -and $Name -notmatch '^[A-Za-z_][A-Za-z0-9_]{0,63}$') { [Console]::Error.WriteLine("invalid name"); exit 2 }
 $Target = "claude-secret:$Name"
 
 Add-Type -TypeDefinition @'
@@ -103,6 +106,33 @@ switch ($Op) {
     $f.Add_Shown({ $f.Activate(); $t.Focus() })
     if ($f.ShowDialog() -ne [Windows.Forms.DialogResult]::OK -or -not $t.Text) { exit 1 }
     [Console]::Out.Write($t.Text)
+    exit 0
+  }
+  'notify' {
+    # $Name holds the message here (names/targets only).
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $n = New-Object Windows.Forms.NotifyIcon
+    $n.Icon = [Drawing.SystemIcons]::Shield; $n.Visible = $true
+    $n.ShowBalloonTip(6000, 'claude-secret', $Name, [Windows.Forms.ToolTipIcon]::Info)
+    Start-Sleep -Seconds 7; $n.Dispose()
+    exit 0
+  }
+  'confirm' {
+    # $Name holds the question. Prints allow/deny; denies after 120 s.
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $f = New-Object Windows.Forms.Form
+    $f.Text = 'claude-secret'; $f.Width = 460; $f.Height = 170; $f.TopMost = $true
+    $f.StartPosition = 'CenterScreen'; $f.FormBorderStyle = 'FixedDialog'; $f.MaximizeBox = $false; $f.MinimizeBox = $false
+    $l = New-Object Windows.Forms.Label; $l.Text = $Name; $l.SetBounds(12, 12, 420, 50)
+    $a = New-Object Windows.Forms.Button; $a.Text = 'Allow'; $a.SetBounds(256, 80, 84, 30)
+    $a.DialogResult = [Windows.Forms.DialogResult]::Yes
+    $d = New-Object Windows.Forms.Button; $d.Text = 'Deny'; $d.SetBounds(348, 80, 84, 30)
+    $d.DialogResult = [Windows.Forms.DialogResult]::No
+    $f.Controls.AddRange(@($l, $a, $d)); $f.AcceptButton = $d; $f.CancelButton = $d
+    $t = New-Object Windows.Forms.Timer; $t.Interval = 120000
+    $t.Add_Tick({ $t.Stop(); $f.DialogResult = [Windows.Forms.DialogResult]::No; $f.Close() }); $t.Start()
+    $f.Add_Shown({ $f.Activate() })
+    if ($f.ShowDialog() -eq [Windows.Forms.DialogResult]::Yes) { [Console]::Out.Write('allow') } else { [Console]::Out.Write('deny') }
     exit 0
   }
   'clip-get' { $c = Get-Clipboard -Raw; if ($c) { [Console]::Out.Write($c.TrimEnd("`r", "`n")) }; exit 0 }
