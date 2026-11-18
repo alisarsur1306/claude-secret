@@ -1,0 +1,13 @@
+# Never commit secrets or local state
+*.txt
+!LICENSE*
+.env
+.env.*
+*.pem
+*.key
+*.status
+*.url
+*.pid
+.DS_Store
+__pycache__/
+*.pyc
