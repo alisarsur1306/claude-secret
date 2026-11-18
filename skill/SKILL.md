@@ -1,31 +1,32 @@
 ---
 name: secret
-description: Save a secret (API key, token, password) to the macOS Keychain through a hidden-input dialog, the clipboard, or a one-time phone link (for Remote Control), and run commands with it injected as an env var — the value never enters the chat, the transcript or tool output. Use for "/secret NAME", "save my token", "store this API key", "use my GITHUB_TOKEN", "תשמור סוד/טוקן", or whenever a command needs a credential the user saved earlier. macOS only.
+description: Save a secret (API key, token, password) to the OS credential store (macOS Keychain or Windows Credential Manager) through a hidden-input dialog, the clipboard, or a one-time phone link (for Remote Control), and run commands with it injected as an env var — the value never enters the chat, the transcript or tool output. Use for "/secret NAME", "save my token", "store this API key", "use my GITHUB_TOKEN", "תשמור סוד/טוקן", or whenever a command needs a credential the user saved earlier. macOS and Windows (Git Bash).
 argument-hint: NAME [phone|clipboard]  (never the value)
 ---
 
-# /secret — Keychain-backed secrets Claude can use but never see
+# /secret — secrets Claude can use but never see
 
-Tool: `~/.claude/skills/secret/bin/secret` (call it `$S` below). Values live in the macOS login
-Keychain (service `claude-secret`, account = NAME). Only names are ever printed.
+Tool: `~/.claude/skills/secret/bin/secret` (call it `$S` below). Values live in the OS credential
+store: the macOS login Keychain (service `claude-secret`, account = NAME), or Windows Credential
+Manager (generic credential `claude-secret:NAME`). Only names are ever printed.
 
 ## Why the value must never be typed in chat
 
 Anything typed in the message box — including `/secret NAME abc123` — is sent to the model and
 written to the session transcript on disk (`~/.claude/projects/**.jsonl`). The only safe ways in
 are the hidden dialog, the clipboard, or the one-time phone link, where the value goes straight from
-the user to the Keychain.
+the user to the credential store.
 
 ## On `/secret <args>`
 
-1. **Args are a single name** (e.g. `/secret GITHUB_TOKEN`): run `$S add GITHUB_TOKEN`. A macOS dialog
-   with a hidden field pops up; tell the user in one line to paste the value there. Report the
-   tool's one-line result (name + length only).
+1. **Args are a single name** (e.g. `/secret GITHUB_TOKEN`): run `$S add GITHUB_TOKEN`. A dialog
+   with a hidden field pops up on the computer; tell the user in one line to paste the value there.
+   Report the tool's one-line result (name + length only).
    If the user is on their phone (Remote Control), use the phone flow (step 3) instead, since the
-   dialog appears on the Mac where nobody can see it.
+   dialog appears on the computer where nobody can see it.
 2. **Args are a name + `clipboard`** (`/secret GITHUB_TOKEN clipboard`): the user copied the value
-   first. Run `$S add GITHUB_TOKEN --clipboard` (it reads then clears the clipboard). With an
-   iPhone near the Mac on the same Apple ID, Universal Clipboard makes this work from the phone too.
+   first. Run `$S add GITHUB_TOKEN --clipboard` (it reads then clears the clipboard). On a Mac with
+   an iPhone nearby on the same Apple ID, Universal Clipboard makes this work from the phone too.
 3. **Args are a name + `phone`** (`/secret GITHUB_TOKEN phone`), or the user is on their phone:
    1. Run `$S add GITHUB_TOKEN --phone`. It prints a one-time HTTPS link (Cloudflare quick tunnel,
       single use, expires in 5 min).
@@ -37,8 +38,8 @@ the user to the Keychain.
    The link carries a random token, so it is safe to show in chat; once used or expired it is dead.
    Cloudflare terminates TLS, so the value passes through Cloudflare's edge in transit.
 4. **No args**: run `$S list` and show the names, plus how to add one.
-5. **Args contain anything that looks like a value** (a second token that is not `clipboard`/`phone`, or a
-   single token that looks like a key, e.g. `sk-…`, `ghp_…`, long random string):
+5. **Args contain anything that looks like a value** (a second token that is not `clipboard`/`phone`,
+   or a single token that looks like a key, e.g. `sk-…`, `ghp_…`, long random string):
    - Do **not** store, repeat, echo, or quote it — not even partially.
    - Tell the user: that value is now in this conversation and its transcript, so treat it as
      exposed and rotate it at the provider; then save the new one with `/secret NAME` (dialog).
@@ -67,19 +68,21 @@ $S run API_KEY -- sh -c 'curl -sH "Authorization: Bearer $API_KEY" https://api.e
 
 ## Hard rules (the redaction is a safety net, not permission)
 
-- Never run `security find-generic-password … -w`, `security dump-keychain -d`, or anything that
-  prints a value.
+- Never read a value directly: no `security find-generic-password … -w`, `security dump-keychain`,
+  `security -i`, no calling `secret-win.ps1 read`, no setting `CLAUDE_SECRET_INTERNAL`, no
+  PowerShell/`CredRead` of `claude-secret:*`. If a command is denied by a permission rule, that is
+  intended — never work around it.
 - Never run `$S run X -- env|printenv|echo|cat|set`, or anything that prints, encodes (hex,
   rev, url-encode, split), writes to a file, or sends the value anywhere except the service it is for.
 - Never paste a value into code, config, commits, or tool arguments; the command reads it from env.
-- `$S delete NAME` deletes a Keychain item permanently — confirm with the user first. Use
+- `$S delete NAME` deletes a saved secret permanently — confirm with the user first. Use
   `delete`, not `rm`: Claude Code's removal safety check blocks `<variable> rm …`.
 - Call the tool by its full path (`~/.claude/skills/secret/bin/secret`); `$S` here is shorthand.
-- If the user asks you to show a secret, decline and point them to Keychain Access.app
-  (search "Claude secret: NAME").
+- If the user asks you to show a secret, decline and point them to Keychain Access.app (macOS,
+  search "Claude secret: NAME") or Credential Manager → Windows Credentials (`claude-secret:NAME`).
 
 ## Limits
 
-- macOS only (Keychain). On Windows/Linux the tool exits with a clear error.
-- Values must be printable ASCII (Keychain returns other values as hex).
+- macOS, or Windows with Git Bash (how Claude Code runs shell commands there). Linux is not supported.
+- Values must be printable ASCII; on Windows at most 1280 characters.
 - Redaction is line-based; a value split across lines or transformed by the command is not caught.

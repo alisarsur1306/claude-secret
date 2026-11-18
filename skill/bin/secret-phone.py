@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""One-time phone page that saves a single secret into the macOS Keychain.
+"""One-time phone page that saves a single secret into the OS credential store.
 
-Started (detached) by `secret add NAME --phone`. It:
+Started (detached) by `secret add NAME --phone` as:
+    secret-phone.py NAME RUN_DIR BASH SECRET_SCRIPT
+It:
   1. serves a tiny form on 127.0.0.1 at /s/<random 192-bit token>,
   2. exposes it through a Cloudflare quick tunnel (HTTPS, no account),
   3. accepts ONE successful save, handing the value to `secret add NAME --stdin`
@@ -26,7 +28,10 @@ TTL = 300           # seconds the link stays valid
 TUNNEL_WAIT = 45    # seconds to wait for cloudflared to come up
 MAX_BODY = 16384
 
-name, tool, run_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+name, run_dir = sys.argv[1], sys.argv[2]
+tool = sys.argv[3:5]   # [bash, secret script]: works on macOS and under Git Bash on Windows
+if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", name) or len(tool) != 2:
+    sys.exit("usage: secret-phone.py NAME RUN_DIR BASH SECRET_SCRIPT")
 token = secrets.token_urlsafe(24)
 secret_path = f"/s/{token}"
 files = {k: os.path.join(run_dir, f"{name}.{k}") for k in ("url", "status", "pid")}
@@ -124,7 +129,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.reply(200, form_page("Empty value — paste it and try again."))
         if "\n" in value or "\r" in value:
             return self.reply(200, form_page("Value must be a single line."))
-        r = subprocess.run([tool, "add", name, "--stdin"], input=value + "\n",
+        r = subprocess.run([*tool, "add", name, "--stdin"], input=value + "\n",
                            capture_output=True, text=True)
         value = fields = None
         if r.returncode != 0:
@@ -139,7 +144,7 @@ def start_tunnel(port):
     """Cloudflare quick tunnel. HOME points at an empty dir so the user's own
     ~/.cloudflared/config.yml (named tunnels) is never read or touched."""
     home = tempfile.mkdtemp(prefix="secret-cf-")
-    env = dict(os.environ, HOME=home)
+    env = dict(os.environ, HOME=home, USERPROFILE=home)  # USERPROFILE: Windows lookup
     proc = subprocess.Popen(
         ["cloudflared", "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
