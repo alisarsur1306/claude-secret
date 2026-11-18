@@ -41,9 +41,9 @@ Claude:  secret run OPENAI_KEY=OPENAI_API_KEY -- curl https://api.openai.com/v1/
 - **☁️ Push straight to the cloud.** "Put OPENAI_KEY on my Vercel project" sets the env var in
   **Vercel, GitHub Actions, Cloudflare Workers/Pages, Fly.io, Supabase or Render**, or any CLI that
   reads stdin. No copy-paste into dashboards, and no human needed in the loop if you choose.
-- **🔔 You always know.** Every push shows a desktop notification, a line in the chat, and an entry
-  in an audit log (names and targets only). Choose how much autonomy Claude gets: `confirm` each
-  push, `auto` when you ask, or `full`.
+- **🔔 You stay in charge.** Every push shows a desktop notification and a line in the chat, and
+  every add, run and push lands in an audit log (names and destinations only). Choose how much
+  autonomy Claude gets: `confirm` each use, `auto` when you ask, or `full`.
 - **🧹 Output is scrubbed.** Anything the command prints is checked, and the key is replaced with
   `[secret:NAME]` before Claude sees it, including its JSON-escaped, URL-encoded, hex and base64
   forms (so a `Basic` auth header gets caught too).
@@ -84,7 +84,6 @@ Then start a new Claude Code session. Run the same command again to update, or r
 | `/secret NAME phone` | You get a one-time link for your phone (for Remote Control). |
 | `/secret` | Lists saved names (never values). |
 | *"use my GITHUB_TOKEN to …"* | Claude runs the command with the secret injected. |
-
 | *"add OPENAI_KEY to my Vercel project"* | Claude pushes it to Vercel's env vars and tells you. |
 
 Under the hood, Claude calls a small helper:
@@ -98,30 +97,36 @@ secret list | secret has NAME | secret delete NAME
 ### ☁️ Push to cloud environments
 
 ```bash
-secret push OPENAI_KEY vercel --env production --as OPENAI_API_KEY
-secret push NPM_TOKEN  github --repo you/app            # Actions secret (also --env, --org)
+secret push OPENAI_KEY vercel --project my-app --env production --as OPENAI_API_KEY
+secret push NPM_TOKEN  github --repo you/app            # Actions secret (also --env, or --org)
 secret push STRIPE_KEY cloudflare --name my-worker      # or --pages my-site
 secret push DB_URL     fly --app my-app
-secret push RESEND_KEY supabase --project-ref abcd      # uses `supabase login`
-secret push API_KEY    render --service srv-xxx         # uses your saved RENDER_API_KEY
+secret push RESEND_KEY supabase --project-ref abcdefgh  # uses `supabase login`
+secret push API_KEY    render --service srv-xxxx        # uses your saved RENDER_API_KEY
 secret pipe TOKEN --line -- some-cli login --with-token # anything else that reads stdin
 ```
 
-The value always goes to the platform's CLI or API on stdin: never on a command line, never in
-a file on disk. The CLIs use your existing logins (`vercel login`, `gh auth login`, `wrangler
-login`, …), and the Render/Supabase API tokens are themselves saved secrets.
+- The value always goes to the platform's CLI or API on stdin: never on a command line, never in a
+  file on disk.
+- The destination must always be named explicitly. Nothing is picked up from the current folder.
+- The CLIs use your own logins (`vercel login`, `gh auth login`, `wrangler login`, …). Token and
+  account environment variables such as `VERCEL_TOKEN` or `GH_TOKEN` are ignored, so a planted
+  variable can't redirect the push to someone else's account.
+- The Render and Supabase API tokens are themselves saved secrets. A successful API push prints only
+  the HTTP status, because the response would echo the value back.
 
 **Autonomy and notifications:**
 
-| `secret config mode …` | Claude may push… |
+| `secret config mode …` | Claude may use or push secrets… |
 |---|---|
-| `confirm` | only after you click **Allow** in a dialog on your computer |
+| `confirm` | only after you click **Allow** in a dialog that shows the exact command or destination (covers `run`, `push` and `pipe`) |
 | `auto` *(default)* | when you ask for it in the chat |
-| `full` | also on its own when a task needs it (e.g. a deploy is missing an env var) |
+| `full` | also push on its own when your task needs it (e.g. a deploy is missing an env var) |
 
-In every mode you get a desktop notification and a chat message, and `secret log` keeps an audit
-trail. Loosening the mode requires a click in a native dialog, so Claude can't promote itself to
-`full`.
+- **Every push:** a desktop notification (best effort, so Focus modes can hide it) and a chat message.
+- **Every add, run and push:** an entry in `secret log`.
+- **The mode is stored in your OS vault, not a config file.** Loosening it requires a click in a
+  native dialog, which only `secret config` can do.
 
 ## 🛡️ Security model, honestly
 
@@ -131,6 +136,11 @@ trail. Loosening the mode requires a click in a native dialog, so Claude can't p
   and are handed to your command as an environment variable.
 - Accidental echo: command output is redacted before Claude sees it.
 - Pastejacking: multi-line or non-printable values are rejected before they reach the vault.
+- Fake tools: the Keychain CLI, dialogs, `perl` and `curl` are called by absolute path, and the
+  script runs with `bash -p`, so a planted `PATH` entry or `BASH_ENV` can't fake a dialog or switch
+  off redaction.
+- Silent swaps: replacing a saved secret from a program (stdin) needs a click. A mistyped or
+  attacker-supplied destination is shown in full in every confirmation dialog and log entry.
 - Phone link abuse: the link has a random 192-bit token, works once, and expires in 5 minutes
   (enforced on every request, with a hard-stop watchdog). It binds only to `127.0.0.1` behind the
   tunnel, times out stalled connections, logs nothing, sends `no-store`/`no-referrer` headers, and
@@ -138,33 +148,42 @@ trail. Loosening the mode requires a click in a native dialog, so Claude can't p
 
 **What it does not do**
 - **It protects keys at rest, not from your own user account.** Any program running as you can
-  ask the Keychain or Credential Manager for these items without a prompt. Claude is the program
-  this tool is built to keep out, and the skill forbids it from reading the vault directly. On macOS
-  you can make that a hard block with deny rules in `~/.claude/settings.json`:
+  ask the Keychain or Credential Manager for these items without a prompt. That includes an npm
+  postinstall script, and an agent with shell access. The modes, dialogs and rules here are
+  guardrails for a well-behaved agent and against accidents. They are **not a sandbox**: a hostile
+  process running as you can get around them.
+- **To tighten things on macOS**, add rules to `~/.claude/settings.json`. The deny rules stop Claude
+  from talking to the Keychain or editing the tool. The ask rules make Claude Code ask you before
+  each use, which is the strongest guard against a prompt injection that asks Claude to run a
+  malicious script with your key.
   ```json
   "permissions": {
     "deny": [
-      "Bash(security find-generic-password*)", "Bash(security find-internet-password*)",
-      "Bash(security dump-keychain*)", "Bash(security export*)", "Bash(security -i*)"
+      "Bash(security *)", "Bash(/usr/bin/security *)",
+      "Edit(~/.config/claude-secret/**)", "Edit(~/.claude/skills/secret/**)"
     ],
-    "ask": [ "Bash(*skills/secret/bin/secret run*)" ]
+    "ask": [
+      "Bash(*skills/secret/bin/secret run*)", "Bash(*skills/secret/bin/secret push*)",
+      "Bash(*skills/secret/bin/secret pipe*)", "Bash(*skills/secret/bin/secret config*)",
+      "Bash(*skills/secret/bin/secret add*)"
+    ]
   }
   ```
-  The `ask` rule makes Claude Code ask you before each use of a secret, which is the strongest guard
-  against a prompt injection asking Claude to run a malicious script with your key. `/secret` keeps
-  working with these rules, because its helper calls the Keychain itself. On Windows, reads go
-  through `secret-win.ps1`, which refuses unless called by the helper. That stops accidents, but it
-  is not a security boundary.
-- What your command does with the key is up to the command. Redaction catches common encodings,
-  but not a value that is split, reversed or written to a file and read back later. If a tool
-  passes the key to a sub-process as a flag, it shows up in `ps` while that runs, so prefer tools
-  that read keys from the environment or stdin.
+  `/secret` keeps working with these rules, because its helper calls the Keychain itself.
+- **On Windows**, reads go through `secret-win.ps1`, which refuses unless called by the helper.
+  That stops accidents, but it is not a security boundary.
+- **What your command does with the key is up to the command.** Redaction catches common encodings:
+  raw, JSON (including `\u00XX`), several URL-encoding styles, hex and base64. It misses a value that
+  is wrapped, split, reversed or written to a file and read back later, and base64 may leave 1–2
+  edge characters visible. The value is passed as an environment variable, which other processes
+  of yours can see (`ps eww`). If a tool passes the key on to a sub-process as a flag, it shows up
+  in `ps` while that runs, so prefer tools that read keys from the environment or stdin.
 - The phone link uses a Cloudflare quick tunnel. Traffic is HTTPS, but Cloudflare terminates TLS,
   so the value passes through Cloudflare's edge in transit.
 - Pushing to a platform means the platform has the secret. Its dashboards, logs and team members
   follow that platform's rules, not this tool's.
 - Clipboard mode clears the clipboard, but not a clipboard manager's history.
-- Values must be one line of printable ASCII (up to 1280 characters on Windows).
+- Values must be one line of printable ASCII, up to 3000 characters (1280 on Windows).
 
 ## ❓ FAQ
 

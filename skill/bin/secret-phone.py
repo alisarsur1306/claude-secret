@@ -30,9 +30,10 @@ TUNNEL_WAIT = 45    # seconds to wait for cloudflared to come up
 MAX_BODY = 16384
 
 name, run_dir = sys.argv[1], sys.argv[2]
-tool = sys.argv[3:5]   # [bash, secret script]: works on macOS and under Git Bash on Windows
-if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", name) or len(tool) != 2:
+if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", name) or len(sys.argv) != 5:
     sys.exit("usage: secret-phone.py NAME RUN_DIR BASH SECRET_SCRIPT")
+# [bash, -p, secret script]: -p ignores BASH_ENV/SHELLOPTS; works on macOS and Git Bash.
+tool = [sys.argv[3], "-p", sys.argv[4]]
 token = secrets.token_urlsafe(24)
 secret_path = f"/s/{token}"
 files = {k: os.path.join(run_dir, f"{name}.{k}") for k in ("url", "status", "pid")}

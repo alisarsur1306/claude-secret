@@ -121,14 +121,19 @@ switch ($Op) {
     # $Name holds the question. Prints allow/deny; denies after 120 s.
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     $f = New-Object Windows.Forms.Form
-    $f.Text = 'claude-secret'; $f.Width = 460; $f.Height = 170; $f.TopMost = $true
+    $f.Text = 'claude-secret'; $f.TopMost = $true; $f.AutoSize = $true; $f.AutoSizeMode = 'GrowAndShrink'
     $f.StartPosition = 'CenterScreen'; $f.FormBorderStyle = 'FixedDialog'; $f.MaximizeBox = $false; $f.MinimizeBox = $false
-    $l = New-Object Windows.Forms.Label; $l.Text = $Name; $l.SetBounds(12, 12, 420, 50)
-    $a = New-Object Windows.Forms.Button; $a.Text = 'Allow'; $a.SetBounds(256, 80, 84, 30)
+    $f.Padding = New-Object Windows.Forms.Padding(12)
+    # Wrapping label: the whole message (incl. the destination) is always visible.
+    $l = New-Object Windows.Forms.Label; $l.Text = $Name; $l.AutoSize = $true
+    $l.MaximumSize = New-Object Drawing.Size(520, 0); $l.Location = New-Object Drawing.Point(12, 12)
+    $f.Controls.Add($l); $f.PerformLayout()
+    $y = $l.Bottom + 16
+    $a = New-Object Windows.Forms.Button; $a.Text = 'Allow'; $a.SetBounds(356, $y, 84, 30)
     $a.DialogResult = [Windows.Forms.DialogResult]::Yes
-    $d = New-Object Windows.Forms.Button; $d.Text = 'Deny'; $d.SetBounds(348, 80, 84, 30)
+    $d = New-Object Windows.Forms.Button; $d.Text = 'Deny'; $d.SetBounds(448, $y, 84, 30)
     $d.DialogResult = [Windows.Forms.DialogResult]::No
-    $f.Controls.AddRange(@($l, $a, $d)); $f.AcceptButton = $d; $f.CancelButton = $d
+    $f.Controls.AddRange(@($a, $d)); $f.AcceptButton = $d; $f.CancelButton = $d
     $t = New-Object Windows.Forms.Timer; $t.Interval = 120000
     $t.Add_Tick({ $t.Stop(); $f.DialogResult = [Windows.Forms.DialogResult]::No; $f.Close() }); $t.Start()
     $f.Add_Shown({ $f.Activate() })
