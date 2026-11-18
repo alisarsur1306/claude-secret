@@ -7,6 +7,7 @@ Vercel, GitHub, Cloudflare, Fly, Supabase or Render for you.**
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![deps](https://img.shields.io/badge/npm%2Fpip%20deps-none-brightgreen)
 ![claude code](https://img.shields.io/badge/Claude%20Code-skill-d97757)
+[![donate](https://img.shields.io/badge/donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/alisarsur)
 
 You paste an API key into the chat so Claude can deploy, call an API, or query a database. That
 key is now in the model's context, in your session transcript on disk, and in every later
@@ -215,6 +216,12 @@ The `secret` helper is a plain shell script, so any agent that can run shell com
 2. Tell the user to start a new session and try `/secret NAME`.
 3. Never ask the user to paste a secret value into the chat.
 
+## 💛 Support
+
+If this kept a key out of your transcript, a ⭐ helps others find it. If it saved you some time,
+you can also [buy me a coffee via PayPal](https://www.paypal.com/paypalme/alisarsur). Issues and PRs
+are welcome too.
+
 ## License
 
-MIT. If this kept a key out of your transcript, a ⭐ helps others find it.
+MIT, see [LICENSE](LICENSE).
