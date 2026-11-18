@@ -17,6 +17,7 @@ import http.server
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,8 @@ token = secrets.token_urlsafe(24)
 secret_path = f"/s/{token}"
 files = {k: os.path.join(run_dir, f"{name}.{k}") for k in ("url", "status", "pid")}
 done = threading.Event()
+deadline = float("inf")   # set once the link is live; enforced on every request
+tunnel = {"proc": None, "home": None}
 
 
 def write(kind, text):
@@ -50,7 +53,7 @@ STYLE = """
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;padding:16px}
 main{width:100%;max-width:420px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px}
 h1{font-size:20px;margin:0 0 4px}p{margin:0 0 16px;color:var(--mut)}code{font:600 15px ui-monospace,monospace;color:var(--fg)}
-input{width:100%;font:16px ui-monospace,monospace;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+input{width:100%;font:16px ui-monospace,monospace;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);-webkit-text-security:disc;text-security:disc}
 button{width:100%;margin-top:12px;min-height:48px;font:600 16px -apple-system,system-ui,sans-serif;border:0;border-radius:10px;background:var(--acc);color:#fff}
 button:active{opacity:.8}.err{color:var(--err);margin:12px 0 0}.ok{color:var(--ok);font-size:18px;font-weight:600}
 """
@@ -69,12 +72,15 @@ def form_page(error=""):
     err = f'<p class=err role=alert>{html.escape(error)}</p>' if error else ""
     return page(
         f"<h1>Save secret</h1><p>Name: <code>{html.escape(name)}</code><br>"
-        "Goes straight to the Mac's Keychain. Claude never sees it. This link works once.</p>"
+        "Goes straight to the computer's password vault. Claude never sees it. "
+        "This link works once.</p>"
         f'<form method=post action="{secret_path}" autocomplete=off>'
         '<label for=v style="position:absolute;left:-9999px">Secret value</label>'
-        '<input id=v name=value type=password required autofocus autocapitalize=off '
-        'autocorrect=off spellcheck=false placeholder="Paste value">'
-        f"<button type=submit>Save to Keychain</button>{err}</form>"
+        # type=text + CSS masking: a type=password field makes phone browsers offer
+        # to save the key into their password manager under the tunnel's hostname.
+        '<input id=v name=value type=text required autofocus autocomplete=off autocapitalize=off '
+        'autocorrect=off spellcheck=false data-1p-ignore data-lpignore=true placeholder="Paste value">'
+        f"<button type=submit>Save</button>{err}</form>"
     )
 
 
@@ -86,6 +92,7 @@ def msg_page(text, ok=False):
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "secret"
     sys_version = ""
+    timeout = 10   # a stalled connection can't hold the single-threaded server open
 
     def log_message(self, *args):  # never log requests
         pass
@@ -107,7 +114,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def valid(self):
-        return secrets.compare_digest(self.path, secret_path) and not done.is_set()
+        return (secrets.compare_digest(self.path.encode("utf-8", "replace"), secret_path.encode())
+                and not done.is_set() and time.time() < deadline)
 
     def do_GET(self):
         if not self.valid():
@@ -144,11 +152,13 @@ def start_tunnel(port):
     """Cloudflare quick tunnel. HOME points at an empty dir so the user's own
     ~/.cloudflared/config.yml (named tunnels) is never read or touched."""
     home = tempfile.mkdtemp(prefix="secret-cf-")
+    tunnel["home"] = home
     env = dict(os.environ, HOME=home, USERPROFILE=home)  # USERPROFILE: Windows lookup
     proc = subprocess.Popen(
         ["cloudflared", "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         text=True, env=env)
+    tunnel["proc"] = proc
     found = {"url": None}
     ready = threading.Event()
 
@@ -165,35 +175,55 @@ def start_tunnel(port):
     return proc, found["url"] if ready.is_set() else None
 
 
+def cleanup():
+    proc = tunnel["proc"]
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    if tunnel["home"]:
+        shutil.rmtree(tunnel["home"], ignore_errors=True)
+    for k in ("url", "pid"):
+        try:
+            os.unlink(files[k])
+        except FileNotFoundError:
+            pass
+
+
+def watchdog():
+    """Hard stop: whatever is stuck, the link and tunnel never outlive the TTL by much."""
+    if not done.is_set():
+        write("status", "expired: nothing was saved")
+    cleanup()
+    os._exit(0)
+
+
 def main():
+    global deadline
     write("pid", str(os.getpid()))
     write("status", "starting")
+    killer = threading.Timer(TUNNEL_WAIT + TTL + 20, watchdog)
+    killer.daemon = True
+    killer.start()
     server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
     server.timeout = 1
-    proc, base = start_tunnel(server.server_address[1])
+    _, base = start_tunnel(server.server_address[1])
     try:
         if not base:
             write("status", "failed: Cloudflare tunnel did not start")
             return
+        deadline = time.time() + TTL
         write("url", base + secret_path)
         write("status", "waiting")
-        deadline = time.time() + TTL
         while not done.is_set() and time.time() < deadline:
             server.handle_request()
         if not done.is_set():
             write("status", "expired: nothing was saved")
     finally:
         server.server_close()
-        proc.terminate()
-        try:
-            proc.wait(5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        for k in ("url", "pid"):
-            try:
-                os.unlink(files[k])
-            except FileNotFoundError:
-                pass
+        cleanup()
 
 
 if __name__ == "__main__":
